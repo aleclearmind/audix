@@ -33,7 +33,6 @@ screenshots/
 .pub/
 /build/
 /coverage/
-pubspec.lock
 
 # Symbolication related
 app.*.symbols

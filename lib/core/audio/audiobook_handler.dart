@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:just_audio/just_audio.dart';
 import 'package:rxdart/rxdart.dart';
 
@@ -103,11 +104,14 @@ class AudiobookHandler extends BaseAudioHandler with SeekHandler {
       title: title,
       artist: author,
       duration: Duration(milliseconds: durationMs),
-      artUri: artPath != null ? Uri.file(artPath) : null,
+      artUri: artPath == null
+          ? null
+          : (kIsWeb ? Uri.parse(artPath) : Uri.file(artPath)),
       displaySubtitle: chapters.isNotEmpty ? chapters.first.title : null,
     ));
+    // On the web [filePath] is a blob: object URL; on mobile it's a file path.
     await _player.setAudioSource(
-      AudioSource.file(filePath),
+      kIsWeb ? AudioSource.uri(Uri.parse(filePath)) : AudioSource.file(filePath),
       initialPosition: Duration(milliseconds: initialPositionMs),
     );
     await _player.setSpeed(speed);

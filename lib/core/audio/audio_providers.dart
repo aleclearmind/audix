@@ -2,11 +2,14 @@ import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:drift/drift.dart' show Value;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rxdart/rxdart.dart';
 
 import '../database/database.dart';
 import '../providers.dart';
+import '../storage/blob_url_stub.dart'
+    if (dart.library.js_interop) '../storage/blob_url_web.dart';
 import '../storage/file_paths.dart';
 import 'audiobook_handler.dart';
 
@@ -113,10 +116,20 @@ class PlayerController {
     final startMs = book.completed ? 0 : (saved?.positionMs ?? 0);
     final speed = saved?.speed ?? 1.0;
 
-    final filePath = await FilePaths.absolutePath(book.m4bPath);
+    String filePath;
     String? artPath;
-    if (book.coverPath != null) {
-      artPath = await FilePaths.absolutePath(book.coverPath!);
+    if (kIsWeb) {
+      // The file bytes live in the database; wrap them in an object URL.
+      final file = await db.bookFile(book.id);
+      if (file == null) {
+        throw StateError('Missing stored file for book ${book.id}');
+      }
+      filePath = objectUrlFromBytes(file.m4b, 'audio/mp4');
+    } else {
+      filePath = await FilePaths.absolutePath(book.m4bPath);
+      if (book.coverPath != null) {
+        artPath = await FilePaths.absolutePath(book.coverPath!);
+      }
     }
 
     await handler.loadBook(

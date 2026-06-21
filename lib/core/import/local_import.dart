@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 
@@ -36,6 +37,27 @@ class LocalImporter {
       id,
       fallbackTitle: fallbackTitle,
       hasCue: cueSourcePath != null,
+    );
+    return id;
+  }
+
+  /// Imports an audiobook from in-memory bytes (used on the web, where files are
+  /// stored in the database rather than on a filesystem).
+  Future<int> importBookBytes({
+    required String name,
+    required Uint8List m4bBytes,
+    Uint8List? cueBytes,
+  }) async {
+    final fallbackTitle = p.basenameWithoutExtension(name);
+    final id = await db.insertBook(
+      BooksCompanion.insert(title: fallbackTitle, m4bPath: ''),
+    );
+    await db.saveBookFile(id, m4bBytes, cueBytes);
+    await finalizer.finalizeWeb(
+      id,
+      fallbackTitle: fallbackTitle,
+      m4bBytes: m4bBytes,
+      cueBytes: cueBytes,
     );
     return id;
   }

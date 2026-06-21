@@ -1,9 +1,13 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:just_audio/just_audio.dart';
 
 import '../cue/cue_parser.dart';
 import '../database/database.dart';
+import '../storage/blob_url_stub.dart'
+    if (dart.library.js_interop) '../storage/blob_url_web.dart';
 import '../storage/file_paths.dart';
 import 'cover_extractor.dart';
 
@@ -65,6 +69,65 @@ class BookFinalizer {
           endMs: c.endMs,
         ),
     ]);
+  }
+
+  /// Web finalize: the file bytes are already stored in the database (there is
+  /// no filesystem). Probes the duration from an object URL, parses the cue from
+  /// bytes, and writes metadata + chapters. Covers are skipped on the web.
+  Future<void> finalizeWeb(
+    int id, {
+    required String fallbackTitle,
+    String? author,
+    required Uint8List m4bBytes,
+    Uint8List? cueBytes,
+  }) async {
+    final url = objectUrlFromBytes(m4bBytes, 'audio/mp4');
+    int durationMs;
+    try {
+      durationMs = await _probeDurationUriMs(url);
+    } finally {
+      revokeObjectUrl(url);
+    }
+
+    final sheet =
+        cueBytes != null ? CueParser.parse(utf8.decode(cueBytes, allowMalformed: true)) : null;
+    final chapters = sheet != null
+        ? chaptersFromCue(sheet, durationMs: durationMs)
+        : singleChapter(durationMs: durationMs, title: fallbackTitle);
+
+    await db.finalizeImportedBook(
+      id,
+      m4bPath: FilePaths.relativePath(id, 'audio.m4b'),
+      cuePath: cueBytes != null ? FilePaths.relativePath(id, 'index.cue') : null,
+      coverPath: null,
+      author: author ?? sheet?.performer,
+      title: sheet?.title ?? fallbackTitle,
+      durationMs: durationMs,
+    );
+
+    await db.insertChapters([
+      for (final c in chapters)
+        ChaptersCompanion.insert(
+          bookId: id,
+          chapterIndex: c.index,
+          title: c.title,
+          startMs: c.startMs,
+          endMs: c.endMs,
+        ),
+    ]);
+  }
+
+  Future<int> _probeDurationUriMs(String url) async {
+    final player = AudioPlayer();
+    try {
+      final duration =
+          await player.setAudioSource(AudioSource.uri(Uri.parse(url)));
+      return duration?.inMilliseconds ?? 0;
+    } catch (_) {
+      return 0;
+    } finally {
+      await player.dispose();
+    }
   }
 
   /// Extracts and stores covers for any books that still lack one.

@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -186,7 +188,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     );
     if (confirmed != true) return;
     await ref.read(databaseProvider).deleteBook(book.id);
-    await FilePaths.deleteBookDir(book.id);
+    // On the web the bytes are removed via the cascading foreign key; there is
+    // no on-disk folder to clean up.
+    if (!kIsWeb) await FilePaths.deleteBookDir(book.id);
   }
 
   Future<void> _import() async {
@@ -195,8 +199,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       type: FileType.custom,
       allowedExtensions: ['m4b', 'cue'],
       allowMultiple: true,
+      withData: kIsWeb, // web has no paths; read the bytes instead
     );
     if (result == null) return;
+
+    if (kIsWeb) {
+      await _importWeb(messenger, result);
+      return;
+    }
 
     String? m4b;
     String? cue;
@@ -226,6 +236,48 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       await ref
           .read(localImporterProvider)
           .importBook(m4bSourcePath: m4b, cueSourcePath: cue);
+      if (mounted) Navigator.of(context).pop();
+      messenger.showSnackBar(const SnackBar(content: Text('Imported')));
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop();
+      messenger.showSnackBar(SnackBar(content: Text('Import failed: $e')));
+    }
+  }
+
+  /// Web import: file_picker returns bytes (no path), stored in the database.
+  Future<void> _importWeb(
+      ScaffoldMessengerState messenger, FilePickerResult result) async {
+    Uint8List? m4bBytes;
+    String? m4bName;
+    Uint8List? cueBytes;
+    for (final file in result.files) {
+      final lower = file.name.toLowerCase();
+      if (lower.endsWith('.m4b')) {
+        m4bBytes = file.bytes;
+        m4bName = file.name;
+      } else if (lower.endsWith('.cue')) {
+        cueBytes = file.bytes;
+      }
+    }
+    if (m4bBytes == null || m4bName == null) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Select an .m4b file (optionally with its .cue).'),
+      ));
+      return;
+    }
+
+    if (!mounted) return;
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    ));
+    try {
+      await ref.read(localImporterProvider).importBookBytes(
+            name: m4bName,
+            m4bBytes: m4bBytes,
+            cueBytes: cueBytes,
+          );
       if (mounted) Navigator.of(context).pop();
       messenger.showSnackBar(const SnackBar(content: Text('Imported')));
     } catch (e) {

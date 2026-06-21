@@ -82,12 +82,15 @@ jobs:
       - name: Serve + Playwright smoke test (records a video)
         run: |
           mkdir -p dist shots
+          # a tiny valid .m4b so the test can exercise importing on the web
+          nix run nixpkgs#ffmpeg -- -hide_banner -loglevel error -y \
+            -f lavfi -i anullsrc=r=44100:cl=mono -t 2 -c:a aac -b:a 32k shots/sample.m4b
           python3 tool/web/serve.py 8087 "$(readlink -f result)" &
           for i in $(seq 1 20); do
             curl -fsS -o /dev/null "http://127.0.0.1:8087/index.html" && break
             sleep 1
           done
-          python3 tool/web/smoke_test.py "http://127.0.0.1:8087/" "$CHROME" shots dist
+          python3 tool/web/smoke_test.py "http://127.0.0.1:8087/" "$CHROME" shots dist shots/sample.m4b
           ls -l dist
 
       - uses: actions/upload-artifact@v4

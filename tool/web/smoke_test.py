@@ -19,6 +19,9 @@ URL = sys.argv[1]
 EXE = sys.argv[2]
 OUT = sys.argv[3] if len(sys.argv) > 3 else "/tmp/audix-web"
 VIDEO_DIR = sys.argv[4] if len(sys.argv) > 4 else None
+# Optional .m4b to import; when given, the test uploads it and asserts the book
+# appears in the library.
+IMPORT_FILE = sys.argv[5] if len(sys.argv) > 5 else None
 
 errors = []
 ok = True
@@ -80,6 +83,33 @@ with sync_playwright() as p:
         if tab == "Settings" and "Skip interval" not in labels():
             print("FAIL: Settings content did not render")
             ok = False
+
+    # Import a real audiobook from the Library tab and assert it appears. The
+    # bytes are stored in the browser (drift wasm DB) and played via a blob URL.
+    if IMPORT_FILE:
+        import_btn = next(
+            (e for e in page.query_selector_all('flt-semantics[role="button"]')
+             if "Import" in (e.text_content() or "")),
+            None,
+        )
+        if import_btn is None:
+            print("FAIL: import button not found")
+            ok = False
+        else:
+            with page.expect_file_chooser(timeout=8000) as fc:
+                import_btn.click(force=True)
+            fc.value.set_files(IMPORT_FILE)
+            page.wait_for_timeout(8000)  # import + finalize (duration probe)
+            page.screenshot(path=f"{OUT}/import.png")
+            joined = " | ".join(
+                (e.text_content() or "")
+                for e in page.query_selector_all("flt-semantics")
+            )
+            if "No audiobooks yet" in joined:
+                print("FAIL: imported book did not appear")
+                ok = False
+            else:
+                print("imported a book on the web")
 
     video = page.video
     context.close()  # flushes the recording

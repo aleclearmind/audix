@@ -80,7 +80,20 @@ class Bookmarks extends Table {
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 }
 
-@DriftDatabase(tables: [Servers, Books, Chapters, Playback, Bookmarks])
+/// Audiobook file bytes, stored in the database on the web (where there is no
+/// filesystem). On mobile the files live on disk and this table is unused.
+@DataClassName('BookFile')
+class BookFiles extends Table {
+  IntColumn get bookId =>
+      integer().references(Books, #id, onDelete: KeyAction.cascade)();
+  BlobColumn get m4b => blob()();
+  BlobColumn get cue => blob().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {bookId};
+}
+
+@DriftDatabase(tables: [Servers, Books, Chapters, Playback, Bookmarks, BookFiles])
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor])
       : super(executor ??
@@ -95,13 +108,14 @@ class AppDatabase extends _$AppDatabase {
             ));
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onUpgrade: (m, from, to) async {
           if (from < 2) await m.createTable(bookmarks);
           if (from < 3) await m.addColumn(bookmarks, bookmarks.kind);
+          if (from < 4) await m.createTable(bookFiles);
         },
         beforeOpen: (details) async {
           // Required so KeyAction.cascade foreign keys are enforced.
@@ -145,6 +159,18 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> deleteBook(int id) =>
       (delete(books)..where((b) => b.id.equals(id))).go();
+
+  // ----------------------------------------------------------- Book files (web)
+  Future<void> saveBookFile(int bookId, Uint8List m4b, Uint8List? cue) =>
+      into(bookFiles).insertOnConflictUpdate(BookFilesCompanion.insert(
+        bookId: Value(bookId),
+        m4b: m4b,
+        cue: cue == null ? const Value.absent() : Value(cue),
+      ));
+
+  Future<BookFile?> bookFile(int bookId) =>
+      (select(bookFiles)..where((f) => f.bookId.equals(bookId)))
+          .getSingleOrNull();
 
   /// Books that have a saved position, most-recently-played first.
   Stream<List<Book>> watchContinueListening() {

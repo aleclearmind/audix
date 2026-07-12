@@ -34,7 +34,10 @@ jobs:
           df -h /
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        run: |
+          sh <(curl -L https://nixos.org/nix/install) --no-daemon
+          echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+          echo "NIX_CONFIG=experimental-features = nix-command flakes" >> "$GITHUB_ENV"
 
       - name: Build the arm64-v8a APK
         run: nix build .#default -L --print-build-logs
@@ -100,7 +103,10 @@ jobs:
             "$AGENT_TOOLSDIRECTORY" || true
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        run: |
+          sh <(curl -L https://nixos.org/nix/install) --no-daemon
+          echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+          echo "NIX_CONFIG=experimental-features = nix-command flakes" >> "$GITHUB_ENV"
 
       - name: Build the web app (offline, via Nix)
         run: nix build .#web -L --print-build-logs

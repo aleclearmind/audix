@@ -39,6 +39,7 @@ flutter test
 ```bash
 nix run github:JinBlack/audix    # build and serve the web app
 nix build github:JinBlack/audix  # build the arm64-v8a APK (-> result/)
+nix build .#web-smoke            # run the browser smoke test, emit its video
 ```
 
 Builds are reproducible and offline; dependencies are vendored as fixed-output
@@ -55,8 +56,10 @@ first:
 tool/web/fetch-web-deps.sh && flutter build web
 ```
 
-A Playwright smoke test (`tool/web/smoke_test.py`) loads the built app, navigates
-every tab and records a video; CI runs it and attaches the video to the release.
+A Playwright smoke derivation (`nix build .#web-smoke`) loads the built app,
+navigates every tab, and records the video that CI attaches to the release.
+APK signing and release configuration live in
+[`nix-android-ci`](https://github.com/aleclearmind/nix-android-ci#signing-keys).
 
 ## Project layout
 

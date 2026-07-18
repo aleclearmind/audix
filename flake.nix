@@ -299,7 +299,10 @@
           meta = with lib; {
             description = "Audix audiobook player — release APK (arm64-v8a)";
             homepage = "https://github.com/JinBlack/audix";
-            platforms = [ "x86_64-linux" "aarch64-linux" ];
+            platforms = [
+              "x86_64-linux"
+              "aarch64-linux"
+            ];
             license = licenses.unfree; # app has no declared licence
           };
         };
@@ -325,7 +328,8 @@
             flutter pub get --offline --enforce-lockfile
             # No service worker: `nix run` serves a fresh build each time, and a
             # cached worker would otherwise keep serving a stale app.
-            flutter build web --release --no-pub --pwa-strategy=none
+            flutter build web --release --no-pub --pwa-strategy=none \
+              --no-web-resources-cdn
             runHook postBuild
           '';
           installPhase = ''
@@ -337,6 +341,54 @@
           dontFixup = true;
           meta.description = "Audix audiobook player — Flutter web build";
         };
+
+        # Boot the Nix-built site in Chromium and exercise the real browser UI.
+        # This is a derivation rather than CI shell glue: `nix build .#web-smoke`
+        # runs the same test locally, `nix flake check` includes it, and
+        # nix-android-ci can publish its recording as an ordinary artifact.
+        playwrightPython = pkgs.python3.withPackages (ps: [ ps.playwright ]);
+        webSmoke =
+          pkgs.runCommand "audix-web-smoke-${version}"
+            {
+              nativeBuildInputs = [
+                playwrightPython
+                pkgs.chromium
+                pkgs.curl
+                pkgs.ffmpeg
+              ];
+              meta.description = "Playwright smoke test and recording for the Audix web build";
+            }
+            ''
+              export HOME="$TMPDIR/home"
+              export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
+              export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+              mkdir -p "$HOME" "$out/screenshots" "$TMPDIR/video"
+
+              ffmpeg -hide_banner -loglevel error -y \
+                -f lavfi -i anullsrc=r=44100:cl=mono -t 2 -c:a aac -b:a 32k \
+                "$TMPDIR/sample.m4b"
+
+              python3 ${./tool/web/serve.py} 8087 ${web} &
+              server=$!
+              trap 'kill "$server" 2>/dev/null || true' EXIT
+
+              ready=false
+              for _ in $(seq 1 30); do
+                if curl -fsS -o /dev/null http://127.0.0.1:8087/index.html; then
+                  ready=true
+                  break
+                fi
+                sleep 1
+              done
+              [ "$ready" = true ]
+
+              python3 ${./tool/web/smoke_test.py} \
+                http://127.0.0.1:8087/ ${pkgs.chromium}/bin/chromium \
+                "$out/screenshots" "$TMPDIR/video" "$TMPDIR/sample.m4b" \
+                ${./tool/web/sample.vtt}
+              test -s "$TMPDIR/video/audix-web-smoke.webm"
+              cp "$TMPDIR/video/audix-web-smoke.webm" "$out/"
+            '';
 
         # ---- Codegen (drift/build_runner) -----------------------------------
         # Runs build_runner in the same offline env that pub get works in, and
@@ -399,11 +451,13 @@
           default = apk;
           audix = apk;
           web = web;
+          web-smoke = webSmoke;
           codegen = codegen;
           pub-cache = pubCache;
           gradle-repo = gradleRepo;
           android-sdk = androidSdk;
         };
+        checks.web-smoke = webSmoke;
         apps.default = {
           type = "app";
           program = "${serveWeb}/bin/audix";

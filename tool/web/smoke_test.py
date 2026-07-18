@@ -191,11 +191,17 @@ with sync_playwright() as p:
             # Search the transcript, then jump from a match.
             click_button("Search")
             page.wait_for_timeout(1500)
-            page.keyboard.type("second", delay=60)
+            # Flutter exposes the focused TextField as a native input on web.
+            # Fill that node directly: sending keys to the page depended on a
+            # focus race and intermittently left the unfiltered lyrics view up.
+            search_input = page.query_selector("input")
+            if search_input is None:
+                raise RuntimeError("transcript search input did not appear")
+            search_input.fill("second")
             page.wait_for_timeout(2000)
             page.screenshot(path=f"{OUT}/transcript_search.png")
             results = all_semantics_text().lower()
-            if "second line" in results and "match" in results:
+            if "second line" in results and "first line" not in results:
                 print("transcript search filtered to matches")
             else:
                 print("FAIL: transcript search did not filter")

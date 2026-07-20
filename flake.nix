@@ -250,7 +250,13 @@
 
         # ---- Final: the APK (pure, offline) ---------------------------------
         apk = pkgs.stdenv.mkDerivation {
-          inherit pname version src;
+          name = "${pname}-${version}-arm64-v8a.apk";
+          inherit src;
+          __structuredAttrs = true;
+          ci = [
+            { action = "sign-apk"; }
+            { action = "release"; }
+          ];
           nativeBuildInputs = [
             flutter
             jdk
@@ -282,9 +288,7 @@
           '';
           installPhase = ''
             runHook preInstall
-            mkdir -p "$out"
-            cp build/app/outputs/flutter-apk/app-release.apk \
-               "$out/${pname}-${version}-arm64-v8a.apk"
+            cp build/app/outputs/flutter-apk/app-release.apk "$out"
             runHook postInstall
           '';
           dontFixup = true;
@@ -345,11 +349,13 @@
         # Boot the Nix-built site in Chromium and exercise the real browser UI.
         # This is a derivation rather than CI shell glue: `nix build .#web-smoke`
         # runs the same test locally, `nix flake check` includes it, and
-        # nix-android-ci can publish its recording as an ordinary artifact.
+        # flake-ci publishes the recording as an ordinary release artifact.
         playwrightPython = pkgs.python3.withPackages (ps: [ ps.playwright ]);
         webSmoke =
-          pkgs.runCommand "audix-web-smoke-${version}"
+          pkgs.runCommand "audix-web-smoke-${version}.webm"
             {
+              __structuredAttrs = true;
+              ci = [ { action = "release"; } ];
               nativeBuildInputs = [
                 playwrightPython
                 pkgs.chromium
@@ -362,7 +368,7 @@
               export HOME="$TMPDIR/home"
               export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
               export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
-              mkdir -p "$HOME" "$out/screenshots" "$TMPDIR/video"
+              mkdir -p "$HOME" "$TMPDIR/screenshots" "$TMPDIR/video"
 
               ffmpeg -hide_banner -loglevel error -y \
                 -f lavfi -i anullsrc=r=44100:cl=mono -t 2 -c:a aac -b:a 32k \
@@ -384,10 +390,10 @@
 
               python3 ${./tool/web/smoke_test.py} \
                 http://127.0.0.1:8087/ ${pkgs.chromium}/bin/chromium \
-                "$out/screenshots" "$TMPDIR/video" "$TMPDIR/sample.m4b" \
+                "$TMPDIR/screenshots" "$TMPDIR/video" "$TMPDIR/sample.m4b" \
                 ${./tool/web/sample.vtt}
               test -s "$TMPDIR/video/audix-web-smoke.webm"
-              cp "$TMPDIR/video/audix-web-smoke.webm" "$out/"
+              cp "$TMPDIR/video/audix-web-smoke.webm" "$out"
             '';
 
         # ---- Codegen (drift/build_runner) -----------------------------------

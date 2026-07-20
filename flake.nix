@@ -156,9 +156,10 @@
 
         # Replace the Gradle wrapper (which would download a distribution) with
         # the nix-provided Gradle. Online for the deps FOD; offline + the vendored
-        # Maven repo for the final build.
-        gradlewOnline = pkgs.writeShellScript "gradlew" ''exec ${gradle}/bin/gradle "$@"'';
-        gradlewOffline = pkgs.writeShellScript "gradlew" ''exec ${gradle}/bin/gradle --offline --init-script ${offlineInit} "$@"'';
+        # Maven repo for the final build. Gradle must not leave a daemon writing
+        # inside $TMPDIR after the builder exits: that races Nix's sandbox cleanup.
+        gradlewOnline = pkgs.writeShellScript "gradlew" ''exec ${gradle}/bin/gradle --no-daemon "$@"'';
+        gradlewOffline = pkgs.writeShellScript "gradlew" ''exec ${gradle}/bin/gradle --offline --no-daemon --init-script ${offlineInit} "$@"'';
 
         androidEnv = ''
           export ANDROID_HOME="${sdkRoot}"
@@ -170,12 +171,12 @@
 
         # Prefer a genuinely large in-sandbox /dev/shm for heavy scratch (the
         # daemon's /tmp can be small). Docker defaults to only 64 MiB, which is
-        # smaller than the pub cache alone, so use $TMPDIR unless at least 2 GiB
+        # smaller than the pub cache alone, so use $TMPDIR unless at least 8 GiB
         # is available.
         mkScratch = ''
           SCRATCH="$TMPDIR/scratch"
           SHM_AVAILABLE_KIB="$(df -Pk /dev/shm 2>/dev/null | awk 'END { print $4 }')"
-          if [ "''${SHM_AVAILABLE_KIB:-0}" -ge 2097152 ]; then
+          if [ "''${SHM_AVAILABLE_KIB:-0}" -ge 8388608 ] && mkdir -p "/dev/shm/${pname}-$$" 2>/dev/null; then
             SCRATCH=/dev/shm/${pname}-$$
           fi
           mkdir -p "$SCRATCH"

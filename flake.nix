@@ -168,11 +168,16 @@
           export GRADLE_OPTS="-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/${buildToolsVersion}/aapt2"
         '';
 
-        # Prefer the large in-sandbox /dev/shm tmpfs for heavy scratch (the
-        # daemon's /tmp can be small); fall back to $TMPDIR.
+        # Prefer a genuinely large in-sandbox /dev/shm for heavy scratch (the
+        # daemon's /tmp can be small). Docker defaults to only 64 MiB, which is
+        # smaller than the pub cache alone, so use $TMPDIR unless at least 2 GiB
+        # is available.
         mkScratch = ''
-          SCRATCH=/dev/shm/${pname}-$$
-          mkdir -p "$SCRATCH" 2>/dev/null || SCRATCH="$TMPDIR/scratch"
+          SCRATCH="$TMPDIR/scratch"
+          SHM_AVAILABLE_KIB="$(df -Pk /dev/shm 2>/dev/null | awk 'END { print $4 }')"
+          if [ "''${SHM_AVAILABLE_KIB:-0}" -ge 2097152 ]; then
+            SCRATCH=/dev/shm/${pname}-$$
+          fi
           mkdir -p "$SCRATCH"
         '';
 

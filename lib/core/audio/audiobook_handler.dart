@@ -44,8 +44,10 @@ class AudiobookHandler extends BaseAudioHandler with SeekHandler {
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.audix.audix.audio',
         androidNotificationChannelName: 'Playback',
-        androidNotificationOngoing: true,
-        androidStopForegroundOnPause: true,
+        // Keep the media session in the foreground while paused. Android 12+
+        // can otherwise reject a headset play command when it tries to restart
+        // this service while the app is in the background.
+        androidStopForegroundOnPause: false,
         fastForwardInterval: Duration(seconds: 30),
         rewindInterval: Duration(seconds: 30),
       ),
@@ -149,6 +151,23 @@ class AudiobookHandler extends BaseAudioHandler with SeekHandler {
   }
 
   // -------------------------------------------------------------- controls
+  /// Handles the multifunction button found on wired headsets and earbuds.
+  ///
+  /// [BaseAudioHandler] normally derives this from the last broadcast
+  /// [PlaybackState]. Use the player's live state instead so two quick presses
+  /// cannot both observe the same (slightly delayed) broadcast value.
+  @override
+  Future<void> click([MediaButton button = MediaButton.media]) {
+    switch (button) {
+      case MediaButton.media:
+        return playing ? pause() : play();
+      case MediaButton.next:
+        return skipToNext();
+      case MediaButton.previous:
+        return skipToPrevious();
+    }
+  }
+
   @override
   Future<void> play() async {
     if (smartResume && _pausedAt != null) {

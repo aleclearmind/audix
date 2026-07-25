@@ -5,10 +5,10 @@ A cross-platform (Android + iOS) audiobook player built with Flutter.
 ## Screenshots
 
 <p align="center">
-  <img src="https://github.com/aleclearmind/audix/releases/latest/download/audix-web-library.png" alt="Audix library" width="210">
-  <img src="https://github.com/aleclearmind/audix/releases/latest/download/audix-web-bookmarks.png" alt="Audix bookmarks" width="210">
-  <img src="https://github.com/aleclearmind/audix/releases/latest/download/audix-web-servers.png" alt="Audix servers" width="210">
-  <img src="https://github.com/aleclearmind/audix/releases/latest/download/audix-web-settings.png" alt="Audix settings" width="210">
+  <img src="https://github.com/aleclearmind/audix/releases/download/latest/audix-web-library.png" alt="Audix library" width="210">
+  <img src="https://github.com/aleclearmind/audix/releases/download/latest/audix-web-bookmarks.png" alt="Audix bookmarks" width="210">
+  <img src="https://github.com/aleclearmind/audix/releases/download/latest/audix-web-servers.png" alt="Audix servers" width="210">
+  <img src="https://github.com/aleclearmind/audix/releases/download/latest/audix-web-settings.png" alt="Audix settings" width="210">
 </p>
 
 ## Features
@@ -67,9 +67,9 @@ tool/web/fetch-web-deps.sh && flutter build web
 
 A Playwright smoke derivation (`nix build .#web-smoke`) loads the built app,
 navigates every tab, and records the video and phone-sized screenshots that CI
-attaches to the release. The README uses GitHub's stable `releases/latest`
-asset URLs, so it follows each new tagged release without committing generated
-images.
+attaches to the release. The README uses stable asset URLs for the rolling
+`latest` release, so it follows each successful main build without committing
+generated images.
 APK signing and release configuration live in
 [`nix-android-ci`](https://github.com/aleclearmind/nix-android-ci#signing-keys).
 

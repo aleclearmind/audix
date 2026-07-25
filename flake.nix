@@ -308,7 +308,7 @@
           };
           meta = with lib; {
             description = "Audix audiobook player — release APK (arm64-v8a)";
-            homepage = "https://github.com/JinBlack/audix";
+            homepage = "https://github.com/aleclearmind/audix";
             platforms = [
               "x86_64-linux"
               "aarch64-linux"
@@ -323,7 +323,10 @@
         web = pkgs.stdenv.mkDerivation {
           pname = "audix-web";
           inherit version src;
-          nativeBuildInputs = [ flutter ];
+          nativeBuildInputs = [
+            flutter
+            pkgs.jq
+          ];
           dontConfigure = true;
           buildPhase = ''
             runHook preBuild
@@ -340,6 +343,28 @@
             # cached worker would otherwise keep serving a stale app.
             flutter build web --release --no-pub --pwa-strategy=none \
               --no-web-resources-cdn
+            # Flutter otherwise fetches its default Roboto face from
+            # fonts.gstatic.com at runtime. Bundle it so the offline web build
+            # (and its screenshots) render text as well as icons.
+            install -m644 ${pkgs.roboto}/share/fonts/truetype/Roboto-Regular.ttf \
+              build/web/assets/fonts/Roboto-Regular.ttf
+            install -m644 ${pkgs.roboto}/share/fonts/truetype/Roboto-Medium.ttf \
+              build/web/assets/fonts/Roboto-Medium.ttf
+            install -m644 ${pkgs.roboto}/share/fonts/truetype/Roboto-Bold.ttf \
+              build/web/assets/fonts/Roboto-Bold.ttf
+            install -m644 ${pkgs.roboto}/share/fonts/truetype/Roboto-Italic.ttf \
+              build/web/assets/fonts/Roboto-Italic.ttf
+            jq '. + [{
+              "family": "Roboto",
+              "fonts": [
+                { "asset": "fonts/Roboto-Regular.ttf", "weight": 400 },
+                { "asset": "fonts/Roboto-Medium.ttf", "weight": 500 },
+                { "asset": "fonts/Roboto-Bold.ttf", "weight": 700 },
+                { "asset": "fonts/Roboto-Italic.ttf", "style": "italic" }
+              ]
+            }]' build/web/assets/FontManifest.json > "$TMPDIR/FontManifest.json"
+            install -m644 "$TMPDIR/FontManifest.json" \
+              build/web/assets/FontManifest.json
             runHook postBuild
           '';
           installPhase = ''
@@ -355,13 +380,11 @@
         # Boot the Nix-built site in Chromium and exercise the real browser UI.
         # This is a derivation rather than CI shell glue: `nix build .#web-smoke`
         # runs the same test locally, `nix flake check` includes it, and
-        # flake-ci publishes the recording as an ordinary release artifact.
+        # flake-ci publishes the recording and screenshots as release artifacts.
         playwrightPython = pkgs.python3.withPackages (ps: [ ps.playwright ]);
-        webSmoke =
-          pkgs.runCommand "audix-web-smoke-${version}.webm"
+        webSmokeRun =
+          pkgs.runCommand "audix-web-smoke-${version}"
             {
-              __structuredAttrs = true;
-              ci = [ { action = "release"; } ];
               nativeBuildInputs = [
                 playwrightPython
                 pkgs.chromium
@@ -399,8 +422,35 @@
                 "$TMPDIR/screenshots" "$TMPDIR/video" "$TMPDIR/sample.m4b" \
                 ${./tool/web/sample.vtt}
               test -s "$TMPDIR/video/audix-web-smoke.webm"
-              cp "$TMPDIR/video/audix-web-smoke.webm" "$out"
+              mkdir -p "$out"
+              install -m644 "$TMPDIR/video/audix-web-smoke.webm" \
+                "$out/audix-web-smoke.webm"
+              for tab in library bookmarks servers settings; do
+                test -s "$TMPDIR/screenshots/tab_$tab.png"
+                install -m644 "$TMPDIR/screenshots/tab_$tab.png" \
+                  "$out/audix-web-$tab.png"
+              done
             '';
+
+        # flake-ci release outputs must each be one regular file. These cheap
+        # wrappers share the single browser run while giving every release
+        # asset a stable, version-independent filename.
+        webReleaseArtifact =
+          name: source:
+          pkgs.runCommand name
+            {
+              __structuredAttrs = true;
+              ci = [ { action = "release"; } ];
+              meta.description = "Audix web smoke-test release artifact: ${name}";
+            }
+            ''
+              cp ${webSmokeRun}/${source} "$out"
+            '';
+        webSmoke = webReleaseArtifact "audix-web-smoke.webm" "audix-web-smoke.webm";
+        webScreenshotLibrary = webReleaseArtifact "audix-web-library.png" "audix-web-library.png";
+        webScreenshotBookmarks = webReleaseArtifact "audix-web-bookmarks.png" "audix-web-bookmarks.png";
+        webScreenshotServers = webReleaseArtifact "audix-web-servers.png" "audix-web-servers.png";
+        webScreenshotSettings = webReleaseArtifact "audix-web-settings.png" "audix-web-settings.png";
 
         # ---- Codegen (drift/build_runner) -----------------------------------
         # Runs build_runner in the same offline env that pub get works in, and
@@ -464,12 +514,16 @@
           audix = apk;
           web = web;
           web-smoke = webSmoke;
+          web-screenshot-library = webScreenshotLibrary;
+          web-screenshot-bookmarks = webScreenshotBookmarks;
+          web-screenshot-servers = webScreenshotServers;
+          web-screenshot-settings = webScreenshotSettings;
           codegen = codegen;
           pub-cache = pubCache;
           gradle-repo = gradleRepo;
           android-sdk = androidSdk;
         };
-        checks.web-smoke = webSmoke;
+        checks.web-smoke = webSmokeRun;
         apps.default = {
           type = "app";
           program = "${serveWeb}/bin/audix";

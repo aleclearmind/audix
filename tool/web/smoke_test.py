@@ -111,6 +111,9 @@ with sync_playwright() as p:
         if not el:
             continue
         el.click(force=True)
+        # Leave the nav destination before its desktop hover tooltip appears;
+        # the screenshots represent the touch-oriented phone layout.
+        page.mouse.move(1, 1)
         page.wait_for_timeout(2500)
         page.screenshot(path=f"{OUT}/tab_{tab.lower()}.png")
         if tab == "Settings" and "Skip interval" not in labels():

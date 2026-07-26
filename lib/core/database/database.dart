@@ -355,7 +355,10 @@ class AppDatabase extends _$AppDatabase {
   // -------------------------------------------------------------- Bookmarks
   Stream<List<Bookmark>> watchBookmarks(int bookId) => (select(bookmarks)
         ..where((b) => b.bookId.equals(bookId))
-        ..orderBy([(b) => OrderingTerm(expression: b.positionMs)]))
+        ..orderBy([
+          (b) => OrderingTerm.desc(b.createdAt),
+          (b) => OrderingTerm.desc(b.id),
+        ]))
       .watch();
 
   Future<int> addBookmark(BookmarksCompanion bookmark) =>
@@ -380,7 +383,10 @@ class AppDatabase extends _$AppDatabase {
   Stream<List<BookmarkEntry>> watchAllBookmarks() {
     final query = select(bookmarks).join(
       [innerJoin(books, books.id.equalsExp(bookmarks.bookId))],
-    )..orderBy([OrderingTerm.desc(bookmarks.createdAt)]);
+    )..orderBy([
+        OrderingTerm.desc(bookmarks.createdAt),
+        OrderingTerm.desc(bookmarks.id),
+      ]);
     return query.watch().map(
           (rows) => rows
               .map((r) => BookmarkEntry(

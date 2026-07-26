@@ -20,6 +20,7 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
   final _controller = TextEditingController();
   String _query = '';
   bool _manualOnly = false;
+  BookmarkSort _sort = BookmarkSort.creation;
 
   @override
   void dispose() {
@@ -32,7 +33,15 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
     final bookmarksAsync = ref.watch(allBookmarksProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Bookmarks')),
+      appBar: AppBar(
+        title: const Text('Bookmarks'),
+        actions: [
+          BookmarkSortButton(
+            value: _sort,
+            onSelected: (sort) => setState(() => _sort = sort),
+          ),
+        ],
+      ),
       body: bookmarksAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
@@ -49,14 +58,14 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
             );
           }
 
-          final filtered = [
+          final filtered = sortBookmarkEntries([
             for (final e in entries)
               if ((!_manualOnly ||
                       e.bookmark.kind == BookmarkKind.manual) &&
                   bookmarkMatches(e.bookmark.note, e.bookmark.chapterIndex,
                       _query, bookTitle: e.book.title))
                 e,
-          ];
+          ], _sort);
 
           return Column(
             children: [

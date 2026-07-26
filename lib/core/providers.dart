@@ -38,7 +38,7 @@ final allBookmarksProvider = StreamProvider<List<BookmarkEntry>>(
   (ref) => ref.watch(databaseProvider).watchAllBookmarks(),
 );
 
-/// Bookmarks for a specific book, ordered by position.
+/// Bookmarks for a specific book, newest first.
 final bookmarksForProvider =
     StreamProvider.family<List<Bookmark>, int>(
   (ref, bookId) => ref.watch(databaseProvider).watchBookmarks(bookId),

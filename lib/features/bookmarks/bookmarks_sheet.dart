@@ -6,6 +6,33 @@ import '../../core/database/database.dart';
 import '../../core/providers.dart';
 import '../../core/util/format.dart';
 
+/// Available ordering modes for bookmark lists.
+enum BookmarkSort { creation, bookmarkTime }
+
+/// Returns bookmarks ordered by [sort] without mutating the source list.
+List<Bookmark> sortBookmarks(
+  Iterable<Bookmark> bookmarks,
+  BookmarkSort sort,
+) =>
+    [...bookmarks]..sort((a, b) => _compareBookmarks(a, b, sort));
+
+/// Returns global bookmark rows ordered by their bookmark fields.
+List<BookmarkEntry> sortBookmarkEntries(
+  Iterable<BookmarkEntry> entries,
+  BookmarkSort sort,
+) =>
+    [...entries]..sort(
+      (a, b) => _compareBookmarks(a.bookmark, b.bookmark, sort),
+    );
+
+int _compareBookmarks(Bookmark a, Bookmark b, BookmarkSort sort) {
+  final comparison = switch (sort) {
+    BookmarkSort.creation => b.createdAt.compareTo(a.createdAt),
+    BookmarkSort.bookmarkTime => a.positionMs.compareTo(b.positionMs),
+  };
+  return comparison != 0 ? comparison : b.id.compareTo(a.id);
+}
+
 /// True if a bookmark's note / book title / "Chapter N" label contains [query].
 bool bookmarkMatches(
   String? note,
@@ -34,6 +61,38 @@ String bookmarkKindLabel(BookmarkKind kind) => switch (kind) {
       BookmarkKind.autoStart => 'Started',
       BookmarkKind.autoStop => 'Stopped',
     };
+
+/// A reusable menu for selecting bookmark ordering.
+class BookmarkSortButton extends StatelessWidget {
+  const BookmarkSortButton({
+    super.key,
+    required this.value,
+    required this.onSelected,
+  });
+
+  final BookmarkSort value;
+  final ValueChanged<BookmarkSort> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<BookmarkSort>(
+      icon: const Icon(Icons.sort),
+      tooltip: 'Sort bookmarks',
+      initialValue: value,
+      onSelected: onSelected,
+      itemBuilder: (_) => const [
+        PopupMenuItem(
+          value: BookmarkSort.creation,
+          child: Text('Creation time'),
+        ),
+        PopupMenuItem(
+          value: BookmarkSort.bookmarkTime,
+          child: Text('Bookmark time'),
+        ),
+      ],
+    );
+  }
+}
 
 /// A reusable rounded filter field for the bookmark views.
 class BookmarkSearchField extends StatelessWidget {
@@ -98,6 +157,7 @@ class _BookmarksSheetState extends ConsumerState<_BookmarksSheet> {
   final _controller = TextEditingController();
   String _query = '';
   bool _manualOnly = false;
+  BookmarkSort _sort = BookmarkSort.creation;
 
   @override
   void dispose() {
@@ -122,22 +182,32 @@ class _BookmarksSheetState extends ConsumerState<_BookmarksSheet> {
     }
 
     final hasAuto = bookmarks.any((b) => b.kind != BookmarkKind.manual);
-    final filtered = [
+    final filtered = sortBookmarks([
       for (final b in bookmarks)
         if ((!_manualOnly || b.kind == BookmarkKind.manual) &&
             bookmarkMatches(b.note, b.chapterIndex, _query))
           b,
-    ];
+    ], _sort);
 
     return SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: BookmarkSearchField(
-              controller: _controller,
-              onChanged: (v) => setState(() => _query = v),
+            padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: BookmarkSearchField(
+                    controller: _controller,
+                    onChanged: (v) => setState(() => _query = v),
+                  ),
+                ),
+                BookmarkSortButton(
+                  value: _sort,
+                  onSelected: (sort) => setState(() => _sort = sort),
+                ),
+              ],
             ),
           ),
           if (hasAuto)

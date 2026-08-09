@@ -232,6 +232,20 @@ class AppDatabase extends _$AppDatabase {
         .map((rows) => rows.map((r) => r.readTable(books)).toList());
   }
 
+  /// The unfinished book whose playback was touched most recently.
+  Future<Book?> mostRecentlyPlayedBook() {
+    final query = select(books).join(
+      [innerJoin(playback, playback.bookId.equalsExp(books.id))],
+    )
+      ..where(books.completed.equals(false))
+      ..orderBy([
+        OrderingTerm.desc(playback.updatedAt),
+        OrderingTerm.desc(books.id),
+      ])
+      ..limit(1);
+    return query.getSingleOrNull().then((row) => row?.readTable(books));
+  }
+
   /// All books joined with their saved position (left join), newest first.
   Stream<List<LibraryEntry>> watchLibraryEntries() {
     final query = select(books).join(

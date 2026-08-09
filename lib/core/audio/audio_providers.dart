@@ -58,7 +58,7 @@ final currentChaptersProvider = FutureProvider<List<Chapter>>((ref) async {
   return ref.watch(databaseProvider).chaptersFor(id);
 });
 
-/// Bookmarks of the currently loaded book, ordered by position.
+/// Bookmarks of the currently loaded book, newest first.
 final currentBookmarksProvider = StreamProvider<List<Bookmark>>((ref) {
   final id = ref.watch(currentBookIdProvider);
   if (id == null) return Stream.value(const []);
@@ -159,6 +159,14 @@ class PlayerController {
       initialPositionMs: startMs,
       speed: speed,
     );
+    // Opening a book counts as the latest reading activity even when the user
+    // leaves before the first autosave tick.
+    await db.savePosition(
+      book.id,
+      positionMs: startMs,
+      chapterIndex: saved?.currentChapter ?? 0,
+      speed: speed,
+    );
     _startAutosave();
   }
 
@@ -192,6 +200,7 @@ class PlayerController {
       positionMs: handler.position.inMilliseconds,
       chapterIndex: Value(handler.currentChapter),
       kind: Value(kind),
+      createdAt: Value(DateTime.now()),
     ));
   }
 

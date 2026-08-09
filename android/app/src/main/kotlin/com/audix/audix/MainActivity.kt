@@ -9,15 +9,15 @@ import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-/// Exposes the "All files access" (MANAGE_EXTERNAL_STORAGE) permission to Dart
-/// over a MethodChannel, so the app can read/write /sdcard/Audiobooks on
-/// Android 11+ without pulling in a permissions plugin.
+/// Bridges the storage permission flow and native widget state to Dart without
+/// pulling in additional Flutter plugins.
 class MainActivity : AudioServiceActivity() {
-    private val channelName = "audix/storage"
+    private val storageChannelName = "audix/storage"
+    private val widgetChannelName = "audix/widget"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, storageChannelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "hasAllFilesAccess" -> result.success(hasAllFilesAccess())
@@ -27,6 +27,21 @@ class MainActivity : AudioServiceActivity() {
                     }
                     else -> result.notImplemented()
                 }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, widgetChannelName)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "sync") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val state = call.arguments as? Map<*, *>
+                AudixWidgetProvider.storeState(
+                    context = this,
+                    title = state?.get("title") as? String,
+                    subtitle = state?.get("subtitle") as? String,
+                    playing = state?.get("playing") as? Boolean ?: false,
+                )
+                result.success(null)
             }
     }
 

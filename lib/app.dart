@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'features/home/home_screen.dart';
+import 'features/startup/startup_screen.dart';
 
 class AudixApp extends StatelessWidget {
   const AudixApp({super.key});
@@ -23,7 +23,7 @@ class AudixApp extends StatelessWidget {
         useMaterial3: true,
       ),
       themeMode: ThemeMode.system,
-      home: const HomeScreen(),
+      home: const StartupScreen(),
     );
   }
 }

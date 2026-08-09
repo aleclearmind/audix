@@ -31,6 +31,8 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
   @override
   Widget build(BuildContext context) {
     final bookmarksAsync = ref.watch(allBookmarksProvider);
+    final currentBookId = ref.watch(currentBookIdProvider);
+    final playing = ref.watch(playbackStateProvider).value?.playing ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -58,6 +60,9 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
             );
           }
 
+          final playbackDurations = startBookmarkPlaybackDurations(
+            entries.map((entry) => entry.bookmark),
+          );
           final filtered = sortBookmarkEntries([
             for (final e in entries)
               if ((!_manualOnly ||
@@ -101,53 +106,94 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
                         itemBuilder: (context, i) {
                           final entry = filtered[i];
                           final b = entry.bookmark;
+                          final startsDay =
+                              _sort == BookmarkSort.creation &&
+                              (i == 0 ||
+                                  !isSameDay(
+                                    filtered[i - 1].bookmark.createdAt,
+                                    b.createdAt,
+                                  ));
                           final hasNote = b.note?.isNotEmpty == true;
                           final pos = formatDuration(
-                              Duration(milliseconds: b.positionMs));
+                            Duration(milliseconds: b.positionMs),
+                          );
                           final when = formatTimestamp(b.createdAt);
+                          final playedFor = playbackDurations[b.id];
+                          final playingNow = playing &&
+                              currentBookId == b.bookId &&
+                              playbackDurations.containsKey(b.id) &&
+                              playedFor == null;
                           final where =
                               'Chapter ${b.chapterIndex + 1} • $pos • $when';
+                          final session = playedFor != null
+                              ? 'Played for ${formatDuration(playedFor)}'
+                              : playingNow
+                                  ? 'Playing now'
+                                  : null;
+                          final location = hasNote
+                              ? '${entry.book.title} • $where'
+                              : where;
+                          final details = session == null
+                              ? location
+                              : '$location\n$session';
 
-                          return ListTile(
-                            leading: BookCover(
-                                coverPath: entry.book.coverPath, size: 48),
-                            title: Row(
-                              children: [
-                                Icon(bookmarkKindIcon(b.kind), size: 16),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    hasNote ? b.note! : entry.book.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (startsDay)
+                                BookmarkDaySeparator(date: b.createdAt),
+                              ListTile(
+                                leading: BookCover(
+                                  coverPath: entry.book.coverPath,
+                                  size: 48,
                                 ),
-                              ],
-                            ),
-                            subtitle: Text(
-                              hasNote ? '${entry.book.title} • $where' : where,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing: PopupMenuButton<String>(
-                              onSelected: (v) {
-                                if (v == 'note') {
-                                  showBookmarkNoteDialog(
-                                      context, ref, b.id, b.note);
-                                } else if (v == 'delete') {
-                                  ref
-                                      .read(databaseProvider)
-                                      .deleteBookmark(b.id);
-                                }
-                              },
-                              itemBuilder: (_) => const [
-                                PopupMenuItem(
-                                    value: 'note', child: Text('Edit note')),
-                                PopupMenuItem(
-                                    value: 'delete', child: Text('Delete')),
-                              ],
-                            ),
-                            onTap: () => _open(entry),
+                                title: Row(
+                                  children: [
+                                    Icon(bookmarkKindIcon(b.kind), size: 16),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        hasNote ? b.note! : entry.book.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                subtitle: Text(
+                                  details,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                trailing: PopupMenuButton<String>(
+                                  onSelected: (v) {
+                                    if (v == 'note') {
+                                      showBookmarkNoteDialog(
+                                        context,
+                                        ref,
+                                        b.id,
+                                        b.note,
+                                      );
+                                    } else if (v == 'delete') {
+                                      ref
+                                          .read(databaseProvider)
+                                          .deleteBookmark(b.id);
+                                    }
+                                  },
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(
+                                      value: 'note',
+                                      child: Text('Edit note'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'delete',
+                                      child: Text('Delete'),
+                                    ),
+                                  ],
+                                ),
+                                onTap: () => _open(entry),
+                              ),
+                            ],
                           );
                         },
                       ),

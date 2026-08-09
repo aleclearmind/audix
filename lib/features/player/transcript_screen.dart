@@ -8,9 +8,9 @@ import '../../core/util/format.dart';
 /// A full-screen, lyrics-style transcript for the currently playing book.
 ///
 /// The line at the current playback position is shown at full strength while
-/// the rest is desaturated; the view auto-scrolls to keep it centred, and
-/// tapping any line seeks (and plays) from there. Scrolling by hand pauses the
-/// auto-follow until the "jump to current" button is tapped.
+/// the rest is desaturated; the view keeps it centred, and tapping any line
+/// seeks (and plays) from there. Dragging temporarily pauses auto-follow so the
+/// gesture is not interrupted, then the current line is restored on release.
 ///
 /// The app-bar search filters the transcript to lines containing the query
 /// (highlighted, with their timestamp); tapping a result jumps playback there
@@ -29,7 +29,7 @@ class _TranscriptScreenState extends ConsumerState<TranscriptScreen> {
   /// Attached to the active line so we can centre it via [Scrollable.ensureVisible].
   final _activeKey = GlobalKey();
 
-  bool _following = true;
+  bool _userScrolling = false;
   bool _searching = false;
   String _query = '';
   int _activeIndex = -2; // sentinel so the first real value triggers a scroll.
@@ -44,6 +44,11 @@ class _TranscriptScreenState extends ConsumerState<TranscriptScreen> {
   /// an earlier line) bails out instead of fighting the current one.
   int _followGen = 0;
   int _followSteps = 0;
+
+  void _resetBuiltRange() {
+    _firstBuilt = 1 << 30;
+    _lastBuilt = -1;
+  }
 
   @override
   void dispose() {
@@ -87,10 +92,20 @@ class _TranscriptScreenState extends ConsumerState<TranscriptScreen> {
   }
 
   void _followStep(int gen, bool animate) {
-    if (gen != _followGen || !mounted || !_following || _searching) return;
-    if (!_scrollController.hasClients) return;
+    if (gen != _followGen || !mounted || _userScrolling || _searching) {
+      return;
+    }
     final index = _activeIndex;
     if (index < 0) return;
+
+    // The list can still be attaching when the transcript first opens.
+    if (!_scrollController.hasClients) {
+      if (_followSteps++ > 10) return;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _followStep(gen, animate),
+      );
+      return;
+    }
 
     final ctx = _activeKey.currentContext;
     if (ctx != null) {
@@ -111,17 +126,18 @@ class _TranscriptScreenState extends ConsumerState<TranscriptScreen> {
     if (built > 0) {
       final pxPerLine = pos.viewportDimension / built;
       final centreLine = (_firstBuilt + _lastBuilt) / 2.0;
-      final target = (pos.pixels + (index - centreLine) * pxPerLine)
-          .clamp(0.0, pos.maxScrollExtent);
+      final target = (pos.pixels + (index - centreLine) * pxPerLine).clamp(
+        0.0,
+        pos.maxScrollExtent,
+      );
+      // The next correction must measure only the newly visible range. Keeping
+      // indices from earlier jumps makes [built] grow toward the entire gap,
+      // shrinking each correction until a far-away active line is never found.
+      _resetBuiltRange();
       pos.jumpTo(target);
     }
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _followStep(gen, animate));
-  }
-
-  void _resumeFollowing() {
-    setState(() => _following = true);
-    _scrollToActive(animate: true);
   }
 
   void _openSearch() => setState(() => _searching = true);
@@ -132,14 +148,14 @@ class _TranscriptScreenState extends ConsumerState<TranscriptScreen> {
       _searching = false;
       _query = '';
     });
+    _scrollToActive(animate: false);
   }
 
   void _seekToCue(SubtitleCueRow cue, int index) {
     final controller = ref.read(playerControllerProvider);
     controller.seek(Duration(milliseconds: cue.startMs));
     controller.play();
-    _activeIndex = index;
-    setState(() => _following = true);
+    setState(() => _activeIndex = index);
     _scrollToActive(animate: true);
   }
 
@@ -159,18 +175,16 @@ class _TranscriptScreenState extends ConsumerState<TranscriptScreen> {
     final cues = ref.watch(currentSubtitlesProvider).value ?? const [];
     final posMs = ref.watch(positionProvider).value?.inMilliseconds ?? 0;
     final playing = ref.watch(playbackStateProvider).value?.playing ?? false;
-    final controller = ref.read(playerControllerProvider);
     final scheme = Theme.of(context).colorScheme;
 
     // Reset the built-line range; the ListView repopulates it during layout,
     // and the post-frame auto-follow reads it back.
-    _firstBuilt = 1 << 30;
-    _lastBuilt = -1;
+    _resetBuiltRange();
 
     final active = _activeFor(cues, posMs);
     if (active != _activeIndex) {
       _activeIndex = active;
-      if (_following && !_searching) _scrollToActive(animate: true);
+      if (!_userScrolling && !_searching) _scrollToActive(animate: true);
     }
 
     final query = _query.trim();
@@ -220,33 +234,31 @@ class _TranscriptScreenState extends ConsumerState<TranscriptScreen> {
           : searchMode
               ? _buildResults(cues, query.toLowerCase(), scheme)
               : _buildTranscript(cues),
-      floatingActionButton: (searchMode || _following || cues.isEmpty)
-          ? null
-          : FloatingActionButton.small(
-              onPressed: _resumeFollowing,
-              tooltip: 'Jump to current line',
-              child: const Icon(Icons.my_location),
-            ),
       bottomNavigationBar: cues.isEmpty
           ? null
           : _MiniControls(
               playing: playing,
               positionMs: posMs,
-              onRewind: controller.skipBackward,
-              onForward: controller.skipForward,
-              onToggle: controller.togglePlayPause,
+              onRewind: () => ref.read(playerControllerProvider).skipBackward(),
+              onForward: () => ref.read(playerControllerProvider).skipForward(),
+              onToggle: () =>
+                  ref.read(playerControllerProvider).togglePlayPause(),
               color: scheme.surfaceContainerHighest,
             ),
     );
   }
 
   Widget _buildTranscript(List<SubtitleCueRow> cues) {
-    return NotificationListener<ScrollStartNotification>(
+    return NotificationListener<ScrollNotification>(
       onNotification: (n) {
-        // A finger drag pauses auto-follow; our own programmatic scrolls carry
-        // no drag details, so they don't trip this.
-        if (n.dragDetails != null && _following) {
-          setState(() => _following = false);
+        // Do not fight a finger drag. Once its fling settles, immediately put
+        // the currently playing cue back on screen.
+        if (n is ScrollStartNotification && n.dragDetails != null) {
+          _userScrolling = true;
+          _followGen++;
+        } else if (n is ScrollEndNotification && _userScrolling) {
+          _userScrolling = false;
+          _scrollToActive(animate: true);
         }
         return false;
       },

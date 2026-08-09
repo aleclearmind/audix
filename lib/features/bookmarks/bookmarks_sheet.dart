@@ -33,6 +33,42 @@ int _compareBookmarks(Bookmark a, Bookmark b, BookmarkSort sort) {
   return comparison != 0 ? comparison : b.id.compareTo(a.id);
 }
 
+/// Maps every automatic start bookmark to the wall-clock time until its
+/// following automatic stop. A null value means that start has no matching
+/// stop yet. Pairing is per book and does not depend on the list's UI order.
+Map<int, Duration?> startBookmarkPlaybackDurations(
+  Iterable<Bookmark> bookmarks,
+) {
+  final ordered = [...bookmarks]
+    ..sort((a, b) {
+      final comparison = a.createdAt.compareTo(b.createdAt);
+      return comparison != 0 ? comparison : a.id.compareTo(b.id);
+    });
+  final openStarts = <int, Bookmark>{};
+  final durations = <int, Duration?>{};
+
+  for (final bookmark in ordered) {
+    switch (bookmark.kind) {
+      case BookmarkKind.manual:
+        break;
+      case BookmarkKind.autoStart:
+        final previous = openStarts[bookmark.bookId];
+        if (previous != null) durations.remove(previous.id);
+        durations[bookmark.id] = null;
+        openStarts[bookmark.bookId] = bookmark;
+        break;
+      case BookmarkKind.autoStop:
+        final start = openStarts.remove(bookmark.bookId);
+        if (start != null) {
+          final elapsed = bookmark.createdAt.difference(start.createdAt);
+          durations[start.id] = elapsed.isNegative ? Duration.zero : elapsed;
+        }
+        break;
+    }
+  }
+  return durations;
+}
+
 /// True if a bookmark's note / book title / "Chapter N" label contains [query].
 bool bookmarkMatches(
   String? note,
@@ -171,6 +207,7 @@ class _BookmarksSheetState extends ConsumerState<_BookmarksSheet> {
         ref.watch(currentBookmarksProvider).value ?? const <Bookmark>[];
     final controller = ref.read(playerControllerProvider);
     final bookId = ref.watch(currentBookIdProvider);
+    final playing = ref.watch(playbackStateProvider).value?.playing ?? false;
 
     if (bookmarks.isEmpty) {
       return const SafeArea(
@@ -182,6 +219,7 @@ class _BookmarksSheetState extends ConsumerState<_BookmarksSheet> {
     }
 
     final hasAuto = bookmarks.any((b) => b.kind != BookmarkKind.manual);
+    final playbackDurations = startBookmarkPlaybackDurations(bookmarks);
     final filtered = sortBookmarks([
       for (final b in bookmarks)
         if ((!_manualOnly || b.kind == BookmarkKind.manual) &&
@@ -243,22 +281,79 @@ class _BookmarksSheetState extends ConsumerState<_BookmarksSheet> {
                     itemCount: filtered.length,
                     itemBuilder: (context, i) {
                       final b = filtered[i];
-                      return BookmarkTile(
-                        bookmark: b,
-                        onTap: () {
-                          controller
-                              .seek(Duration(milliseconds: b.positionMs));
-                          Navigator.pop(context);
-                        },
-                        onEditNote: () =>
-                            showBookmarkNoteDialog(context, ref, b.id, b.note),
-                        onDelete: () =>
-                            ref.read(databaseProvider).deleteBookmark(b.id),
+                      final startsDay =
+                          _sort == BookmarkSort.creation &&
+                          (i == 0 ||
+                              !isSameDay(
+                                filtered[i - 1].createdAt,
+                                b.createdAt,
+                              ));
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (startsDay)
+                            BookmarkDaySeparator(date: b.createdAt),
+                          BookmarkTile(
+                            bookmark: b,
+                            playedFor: playbackDurations[b.id],
+                            playingNow: playing &&
+                                playbackDurations.containsKey(b.id) &&
+                                playbackDurations[b.id] == null,
+                            onTap: () {
+                              controller.seek(
+                                Duration(milliseconds: b.positionMs),
+                              );
+                              Navigator.pop(context);
+                            },
+                            onEditNote: () => showBookmarkNoteDialog(
+                              context,
+                              ref,
+                              b.id,
+                              b.note,
+                            ),
+                            onDelete: () =>
+                                ref.read(databaseProvider).deleteBookmark(b.id),
+                          ),
+                        ],
                       );
                     },
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A labelled divider between calendar days in creation-sorted bookmark lists.
+class BookmarkDaySeparator extends StatelessWidget {
+  const BookmarkDaySeparator({super.key, required this.date});
+
+  final DateTime date;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      header: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+        child: Row(
+          children: [
+            Expanded(child: Divider(color: scheme.outlineVariant)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                formatDayHeading(date),
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: scheme.primary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Expanded(child: Divider(color: scheme.outlineVariant)),
+          ],
+        ),
       ),
     );
   }
@@ -273,12 +368,16 @@ class BookmarkTile extends StatelessWidget {
     required this.onEditNote,
     required this.onDelete,
     this.bookTitle,
+    this.playedFor,
+    this.playingNow = false,
   });
 
   final Bookmark bookmark;
   final VoidCallback onTap;
   final VoidCallback onEditNote;
   final VoidCallback onDelete;
+  final Duration? playedFor;
+  final bool playingNow;
 
   /// When set (global list), shown in the subtitle to identify the book.
   final String? bookTitle;
@@ -292,16 +391,22 @@ class BookmarkTile extends StatelessWidget {
     final hasNote = b.note?.isNotEmpty == true;
     final title = hasNote ? b.note! : bookmarkKindLabel(b.kind);
     final where = 'Chapter $chapterNo • $pos';
-    final subtitle = [
+    final location = [
       if (bookTitle != null) bookTitle,
       where,
       when,
     ].join(' • ');
+    final session = playedFor != null
+        ? 'Played for ${formatDuration(playedFor!)}'
+        : playingNow
+            ? 'Playing now'
+            : null;
+    final subtitle = session == null ? location : '$location\n$session';
 
     return ListTile(
       leading: Icon(bookmarkKindIcon(b.kind)),
       title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
       trailing: PopupMenuButton<String>(
         onSelected: (v) {
           if (v == 'note') onEditNote();

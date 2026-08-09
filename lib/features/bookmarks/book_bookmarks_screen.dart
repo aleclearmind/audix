@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/audio/audio_providers.dart';
 import '../../core/database/database.dart';
 import '../../core/providers.dart';
+import '../../core/util/format.dart';
 import '../player/player_screen.dart';
 import 'bookmarks_sheet.dart';
 
@@ -34,6 +35,8 @@ class _BookBookmarksScreenState extends ConsumerState<BookBookmarksScreen> {
   Widget build(BuildContext context) {
     final book = widget.book;
     final async = ref.watch(bookmarksForProvider(book.id));
+    final currentBookId = ref.watch(currentBookIdProvider);
+    final playing = ref.watch(playbackStateProvider).value?.playing ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -64,6 +67,8 @@ class _BookBookmarksScreenState extends ConsumerState<BookBookmarksScreen> {
           }
 
           final hasAuto = bookmarks.any((b) => b.kind != BookmarkKind.manual);
+          final playbackDurations =
+              startBookmarkPlaybackDurations(bookmarks);
           final filtered = sortBookmarks([
             for (final b in bookmarks)
               if ((!_manualOnly || b.kind == BookmarkKind.manual) &&
@@ -109,13 +114,37 @@ class _BookBookmarksScreenState extends ConsumerState<BookBookmarksScreen> {
                         itemCount: filtered.length,
                         itemBuilder: (context, i) {
                           final b = filtered[i];
-                          return BookmarkTile(
-                            bookmark: b,
-                            onTap: () => _open(b.positionMs),
-                            onEditNote: () => showBookmarkNoteDialog(
-                                context, ref, b.id, b.note),
-                            onDelete: () =>
-                                ref.read(databaseProvider).deleteBookmark(b.id),
+                          final startsDay =
+                              _sort == BookmarkSort.creation &&
+                              (i == 0 ||
+                                  !isSameDay(
+                                    filtered[i - 1].createdAt,
+                                    b.createdAt,
+                                  ));
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (startsDay)
+                                BookmarkDaySeparator(date: b.createdAt),
+                              BookmarkTile(
+                                bookmark: b,
+                                playedFor: playbackDurations[b.id],
+                                playingNow: playing &&
+                                    currentBookId == book.id &&
+                                    playbackDurations.containsKey(b.id) &&
+                                    playbackDurations[b.id] == null,
+                                onTap: () => _open(b.positionMs),
+                                onEditNote: () => showBookmarkNoteDialog(
+                                  context,
+                                  ref,
+                                  b.id,
+                                  b.note,
+                                ),
+                                onDelete: () => ref
+                                    .read(databaseProvider)
+                                    .deleteBookmark(b.id),
+                              ),
+                            ],
                           );
                         },
                       ),
